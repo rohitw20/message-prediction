@@ -10,7 +10,7 @@ app = FastAPI()
 
 # Define the request model
 class Message(BaseModel):
-    text: str
+    message: str
 
 # Your custom keyword booster function
 def keyword_boost(text):
@@ -30,6 +30,6 @@ def keyword_boost(text):
 # Define the prediction route
 @app.post("/predict")
 def predict(message: Message):
-    boosted_message = keyword_boost(message.text)
+    boosted_message = keyword_boost(message.message)
     prediction = model.predict([boosted_message])[0]
     return {"prediction": prediction}
