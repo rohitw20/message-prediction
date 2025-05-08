@@ -3,8 +3,10 @@ from pydantic import BaseModel
 import joblib
 
 # Load the trained model
-model = joblib.load('sms_classifier.pkl')
+status_model = joblib.load('sms_classifier.pkl')
 
+# Loading the category prediction model
+category_model = joblib.load("sms_category_model.pkl")
 # Define the app
 app = FastAPI()
 
@@ -27,9 +29,17 @@ def keyword_boost(text):
             extra_tokens.append('creditkeyword')
     return text + " " + " ".join(extra_tokens)
 
+def predict_category(message): 
+    return category_model.predict([message])[0]
+
 # Define the prediction route
 @app.post("/predict")
 def predict(message: Message):
-    boosted_message = keyword_boost(message.message)
-    prediction = model.predict([boosted_message])[0]
-    return {"prediction": prediction}
+    current_message = message.message
+    boosted_message = keyword_boost(current_message)
+    prediction_message = status_model.predict([boosted_message])[0]
+    prediction_category = predict_category(current_message) 
+    return {
+        "status": prediction_message,
+        "category": prediction_category
+        }
