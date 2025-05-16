@@ -1,12 +1,16 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import joblib
+import re
+import string
+import numpy as np
 
-# Load the trained model
+# Load the trained models
 status_model = joblib.load('sms_classifier.pkl')
-
-# Loading the category prediction model
 category_model = joblib.load("sms_category_model.pkl")
+amount_model = joblib.load("amount_predictor_model.pkl")
+tfidf_vectorizer = joblib.load("tfidf_vectorizer.pkl")
+
 # Define the app
 app = FastAPI()
 
@@ -14,32 +18,70 @@ app = FastAPI()
 class Message(BaseModel):
     message: str
 
-# Your custom keyword booster function
+# Text cleaning function
+def clean_text(text):
+    text = str(text).lower()
+    text = re.sub(r"http\S+|www\S+|https\S+", '', text)
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+# Keyword booster function
 def keyword_boost(text):
-    debit_keywords = ['removed', 'debited', 'deducted', 'withdrawn', 'purchased', 'spent', 'paid']
-    credit_keywords = ['credited', 'received', 'deposited', 'added']
-    
+    debit_keywords = [
+        'removed', 'debited', 'deducted', 'withdrawn', 'purchased', 'spent',
+        'paid', 'payment made', 'txn', 'transferred', 'upi payment', 'imps'
+    ]
+
+    credit_keywords = [
+        'credited', 'received', 'deposited', 'added', 'rewarded',
+        'refunded', 'reversed', 'cashback', 'payment received',
+        'amount added', 'settled', 'salary', 'tpt', 'neft'
+    ]
+
     text = text.lower()
-    extra_tokens = []
+    boost = []
+
     for word in debit_keywords:
         if word in text:
-            extra_tokens.append('debitkeyword')
+            boost.extend(['debitkeyword'] * 5)
+
     for word in credit_keywords:
         if word in text:
-            extra_tokens.append('creditkeyword')
-    return text + " " + " ".join(extra_tokens)
+            boost.extend(['creditkeyword'] * 5)
 
-def predict_category(message): 
+    return text + " " + " ".join(boost)
+
+# Regex extractor for amount
+def extract_amount_regex(text):
+    matches = re.findall(r'\b(?:inr|rs|mrp)?\s?([0-9]+(?:\.[0-9]{1,2})?)\b', text.lower())
+    return float(matches[0]) if matches else 0.0
+
+# Predict transaction category
+def predict_category(message):
     return category_model.predict([message])[0]
+
+# Predict transaction amount
+def predict_amount(text):
+    regex_amount = extract_amount_regex(text)
+    if regex_amount > 0:
+        return regex_amount
+    else:
+        cleaned = clean_text(text)
+        transformed = tfidf_vectorizer.transform([cleaned])
+        return round(amount_model.predict(transformed)[0], 2)
 
 # Define the prediction route
 @app.post("/predict")
 def predict(message: Message):
     current_message = message.message
     boosted_message = keyword_boost(current_message)
-    prediction_message = status_model.predict([boosted_message])[0]
-    prediction_category = predict_category(current_message) 
+    prediction_status = status_model.predict([boosted_message])[0]
+    prediction_category = predict_category(current_message)
+    prediction_amount = predict_amount(current_message)
+
     return {
-        "status": prediction_message,
-        "category": prediction_category
-        }
+        "status": prediction_status,
+        "category": prediction_category,
+        "amount": prediction_amount
+    }
