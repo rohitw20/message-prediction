@@ -4,12 +4,14 @@ import joblib
 import re
 import string
 import numpy as np
+import spacy
 
 # Load the trained models
 status_model = joblib.load('sms_classifier.pkl')
 category_model = joblib.load("sms_category_model.pkl")
 amount_model = joblib.load("amount_predictor_model.pkl")
 tfidf_vectorizer = joblib.load("tfidf_vectorizer.pkl")
+sender_nlp_model = spacy.load("sender_ner_model")
 
 # Define the app
 app = FastAPI()
@@ -71,6 +73,15 @@ def predict_amount(text):
         transformed = tfidf_vectorizer.transform([cleaned])
         return round(amount_model.predict(transformed)[0], 2)
 
+def predict_sender(text):
+    doc = sender_nlp_model(text)
+    sender = [ent.text for ent in doc.ents]
+    print(sender)
+    if len(sender)>0:
+        return sender[0]
+    else:
+        return "Unknown"
+
 # Define the prediction route
 @app.post("/predict")
 def predict(message: Message):
@@ -79,9 +90,11 @@ def predict(message: Message):
     prediction_status = status_model.predict([boosted_message])[0]
     prediction_category = predict_category(current_message)
     prediction_amount = predict_amount(current_message)
+    prediction_sender = predict_sender(current_message)
 
     return {
         "status": prediction_status,
         "category": prediction_category,
-        "amount": prediction_amount
+        "amount": prediction_amount,
+        "sender": prediction_sender
     }
